@@ -22,6 +22,9 @@
     <!-- Custom styles for this template -->
     <link href="offcanvas.css" rel="stylesheet">
     <!--    <link rel="icon" href="img/favicon.gif" type="image/gif">-->
+    <script type="text/javascript"
+        src="https://www.maths.nottingham.ac.uk/plp/pmadw/LaTeXMathML.js">
+    </script>
 </head>
 
 <body>
@@ -82,13 +85,58 @@
         <p>
             Given four imaging modalities denoted as $[X_1, X_2, X_3, X_4]$ and a predicted multi-class brain tumor segmentation mask ($S_{pred}$), 
             the goal of our approach is to automatically assess the tumor segmentation quality by simultaneously predicting DSC and identifying segmentation errors as a binary mask ($S_{err}$).
-             Toward this end, we proposed a 3D encoder-decoder architecture termed QCResUNet (see Fig \ref{fig:network}(a)) for simultaneously predicting DSC and localizing segmentation errors. 
+             Toward this end, we proposed a 3D encoder-decoder architecture termed QCResUNet (see Figure 1.(a)) for simultaneously predicting DSC and localizing segmentation errors. 
              QCResUNet has two parts trained in an end-to-end fashion: i) a ResNet-34 encoder for DSC prediction; and ii) a decoder architecture for segmentation error map prediction 
              (i.e., the difference between predicted segmentation and ground-truth segmentation). 
         </p>
         <img src="images/network.jpg" style="width:100%">
+        <p style="text-align: justify;"><b>Figure 1:</b> (a) The proposed QCResUNet model adopts an encoder-decoder neural network architecture that takes four modalities and the segmentation to be evaluated. Given this input, QCResUNet predicts the DSC and segmentation error map. (b) The residual block in the encoder. (c) The convolutional block in the decoder.</p>
+        <hr>
     </div>
     
+    <div class="section">
+        <h2>Multi-Task Learning</h2>
+        <hr>
+        <p>
+            The training QCResUNet is under the multi-task learning framework, whose objective function consists of two parts. The first part corresponds to the DSC regression task. It consists of a mean absolute error (MAE) loss ($\mathcal{L}_{MAE}$) term that penalizes differences between ground truth ($DSC_{gt}$) and  predicted DSC ($DSC_{pred}$):
+            <blockquote>
+                <center>
+                $\begin{eqnarray}
+                \mathcal{L}_{MAE} = \frac{1}{N} \sum_{n=1}^{N} |DSC_{gt}^{(n)} - DSC_{pred}^{(n)}|_1,
+                \end{eqnarray}$
+                </center>
+            </blockquote>
+            where $N$ denotes the number of samples in a batch. 
+            The second part of the objective function corresponds to the segmentation error prediction. 
+            It consists of a dice loss~\cite{drozdzal2016importance} and a binary cross-entropy loss, given by:
+            <blockquote>
+                <center>
+                $\begin{eqnarray}
+                \mathcal{L}_{dice} = - \frac{2 \cdot \sum_{i=1}^{I} S_{err_{gt}}^{(i)} \cdot  S_{err_{pred}}^{(i)} }{\sum_{i=1}^{I}S_{err_{gt}}^{(i)} + \sum_{i=1}^{I}S_{err_{pred}}^{(i)}}
+                <!-- \mathcal{L}_{BCE} = -\frac{1}{I} \sum_{i=1}^{I} S_{err_{gt}}^{(i)} \log S_{err_{pred}}^{(i)} + (1- S_{err_{gt}}^{(i)})\log(1-S_{err_{pred}}^{(i)}), -->
+                <!-- $\end{eqnarray} -->
+                </center>
+            </blockquote>
+            <!-- <hr> -->
+            <blockquote>
+                <center>
+                $\begin{eqnarray}
+                \mathcal{L}_{BCE} = -\frac{1}{I} \sum_{i=1}^{I} S_{err_{gt}}^{(i)} \log S_{err_{pred}}^{(i)} + (1- S_{err_{gt}}^{(i)}) \log \left( 1-S_{err_{pred}}^{(i)} \right)
+                <!-- $\end{eqnarray} -->
+                </center>
+            </blockquote>
+            where $S_{err_{gt}}$, $S_{err_{pred}}$ denote the binary ground-truth segmentation error map and the predicted error segmentation map from the sigmoid output of the decoder, respectively. The dice loss and cross-entropy loss were averaged across the number of pixels $I$ in a batch.
+            The two parts are combined using a weight parameter $\lambda$ to balance the different loss components:
+            <blockquote>
+                <center>
+                $\begin{eqnarray}
+                \mathcal{L}_{total} = \mathcal{L}_{MAE} + \lambda (\mathcal{L}_{dice} + \mathcal{L}_{BCE}).
+                <!-- $\end{eqnarray} -->
+                </center>
+            </blockquote>
+            <hr>
+        </p>
+    </div>
     
     <div class="section">
         <h2>Validation on BraTS 2021 dataset</h2>
@@ -99,8 +147,8 @@
         <!-- <h2>Comparison to Baselines </h2> -->
         <div class="row align-items-center">
             <div class="col justify-content-center text-center">
-                <img src="images/table.png" style="width:100%">
                 <p style="text-align: justify;"><b>Table 1:</b> The QC performance of three baseline methods and the proposed method was evaluated on in-sample (nnUNet and SegGen) and out-of-sample (DeepMedic) segmentations. The best metrics in each column are highlighted in bold.</p>
+                <img src="images/table.png" style="width:100%">       
             </div>
         </div>
         
@@ -112,6 +160,7 @@
                 <p style="text-align: justify;"><b>Figure 2:</b> Comparison of QC performance between three baseline methods (UNet, ResNet-34, ResNet-50) and the proposed method (QCResUNet) for segmentations generated using nnUNet and SegGen (top row) as well as  DeepMedic (bottom row).</p>
             </div>
         </div>
+        <hr>
     </div>
 
     <div class="section">
