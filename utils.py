@@ -1,0 +1,192 @@
+import warnings
+import logging
+import math
+import numpy as np
+import torch
+import torch.distributed as dist
+import torch.backends.cudnn as cudnn
+from batchgenerators.utilities.file_and_folder_operations import *
+
+
+def pad2size(case_all_data, patch_size, pad_mode='constant'):
+    need_to_pad = (np.array(patch_size) - np.array(patch_size)).astype(int)
+    for d in range(3):
+        if need_to_pad[d] + case_all_data.shape[d + 1] < patch_size[d]:
+            need_to_pad[d] = patch_size[d] - case_all_data.shape[d + 1]
+
+    shape = case_all_data.shape[1:]
+    lb_x = - need_to_pad[0] // 2
+    ub_x = shape[0] + need_to_pad[0] // 2 + need_to_pad[0] % 2 - patch_size[0]
+    lb_y = - need_to_pad[1] // 2
+    ub_y = shape[1] + need_to_pad[1] // 2 + need_to_pad[1] % 2 - patch_size[1]
+    lb_z = - need_to_pad[2] // 2
+    ub_z = shape[2] + need_to_pad[2] // 2 + need_to_pad[2] % 2 - patch_size[2]
+
+    bbox_x_lb = np.random.randint(lb_x, ub_x + 1)
+    bbox_y_lb = np.random.randint(lb_y, ub_y + 1)
+    bbox_z_lb = np.random.randint(lb_z, ub_z + 1)
+
+    bbox_x_ub = bbox_x_lb + patch_size[0]
+    bbox_y_ub = bbox_y_lb + patch_size[1]
+    bbox_z_ub = bbox_z_lb + patch_size[2]
+
+    valid_bbox_x_lb = max(0, bbox_x_lb)
+    valid_bbox_x_ub = min(shape[0], bbox_x_ub)
+    valid_bbox_y_lb = max(0, bbox_y_lb)
+    valid_bbox_y_ub = min(shape[1], bbox_y_ub)
+    valid_bbox_z_lb = max(0, bbox_z_lb)
+    valid_bbox_z_ub = min(shape[2], bbox_z_ub)
+
+    case_all_data = np.copy(case_all_data[:, valid_bbox_x_lb:valid_bbox_x_ub,
+                                    valid_bbox_y_lb:valid_bbox_y_ub,
+                                    valid_bbox_z_lb:valid_bbox_z_ub])
+
+    data = np.pad(case_all_data[:-4], ((0, 0),
+                                            (-min(0, bbox_x_lb), max(bbox_x_ub - shape[0], 0)),
+                                            (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0)),
+                                            (-min(0, bbox_z_lb), max(bbox_z_ub - shape[2], 0))),
+                             pad_mode)
+
+    seg = np.pad(case_all_data[-4:], ((0, 0),
+                                            (-min(0, bbox_x_lb), max(bbox_x_ub - shape[0], 0)),
+                                            (-min(0, bbox_y_lb), max(bbox_y_ub - shape[1], 0)),
+                                            (-min(0, bbox_z_lb), max(bbox_z_ub - shape[2], 0))),
+                               pad_mode, **{'constant_values': -1})
+
+    return data, seg
+
+def is_dist_avail_and_initialized():
+    if not dist.is_available():
+        return False
+    if not dist.is_initialized():
+        return False
+    return True
+
+
+def get_world_size():
+    if not is_dist_avail_and_initialized():
+        return 1
+    return dist.get_world_size()
+
+
+def get_rank():
+    if not is_dist_avail_and_initialized():
+        return 0
+    return dist.get_rank()
+
+
+def is_main_process():
+    return get_rank() == 0
+
+def save_on_master(*args, **kwargs):
+    if is_main_process():
+        torch.save(*args, **kwargs)
+
+def fix_random_seeds(seed=31):
+    """
+    Fix random seeds.
+    """
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+ 
+    np.random.seed(seed)
+    cudnn.benchmark = True
+
+def get_logger(filename, verbosity=1, name=None):
+    level_dict = {0: logging.DEBUG, 1: logging.INFO, 2: logging.WARNING}
+    formatter = logging.Formatter(
+        "[%(asctime)s][%(filename)s][line:%(lineno)d][%(levelname)s] %(message)s"
+    )
+    logger = logging.getLogger(name)
+    logger.setLevel(level_dict[verbosity])
+    
+    fh = logging.FileHandler(filename, "w")
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+    
+    sh = logging.StreamHandler()
+    sh.setFormatter(formatter)
+    logger.addHandler(sh)
+    
+    return logger
+
+def make_dirs(save_dir):
+    existing_versions = os.listdir(save_dir)
+        
+    if len(existing_versions) > 0:
+        max_version = int(existing_versions[0].split("_")[-1])
+        for v in existing_versions:
+            ver = int(v.split("_")[-1])
+            if ver > max_version:
+                    max_version = ver
+        version = int(max_version) + 1
+    else:
+        version = 0
+
+    return f"{save_dir}/exp_{version}"
+
+
+def _no_grad_trunc_normal_(tensor, mean, std, a, b):
+    # Cut & paste from PyTorch official master until it's in a few official releases - RW
+    # Method based on https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
+    def norm_cdf(x):
+        # Computes standard normal cumulative distribution function
+        return (1. + math.erf(x / math.sqrt(2.))) / 2.
+
+    if (mean < a - 2 * std) or (mean > b + 2 * std):
+        warnings.warn("mean is more than 2 std from [a, b] in nn.init.trunc_normal_. "
+                      "The distribution of values may be incorrect.",
+                      stacklevel=2)
+
+    with torch.no_grad():
+        # Values are generated by using a truncated uniform distribution and
+        # then using the inverse CDF for the normal distribution.
+        # Get upper and lower cdf values
+        l = norm_cdf((a - mean) / std)
+        u = norm_cdf((b - mean) / std)
+
+        # Uniformly fill tensor with values from [l, u], then translate to
+        # [2l-1, 2u-1].
+        tensor.uniform_(2 * l - 1, 2 * u - 1)
+
+        # Use inverse cdf transform for normal distribution to get truncated
+        # standard normal
+        tensor.erfinv_()
+
+        # Transform to proper mean, std
+        tensor.mul_(std * math.sqrt(2.))
+        tensor.add_(mean)
+
+        # Clamp to ensure it's in the proper range
+        tensor.clamp_(min=a, max=b)
+        return tensor
+
+def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
+    return _no_grad_trunc_normal_(tensor, mean, std, a, b)
+
+def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0, start_warmup_value=0):
+    warmup_schedule = np.array([])
+    warmup_iters = warmup_epochs * niter_per_ep
+    if warmup_epochs > 0:
+        warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
+
+    iters = np.arange(epochs * niter_per_ep - warmup_iters)
+    schedule = final_value + 0.5 * (base_value - final_value) * (1 + np.cos(np.pi * iters / len(iters)))
+
+    schedule = np.concatenate((warmup_schedule, schedule))
+    assert len(schedule) == epochs * niter_per_ep
+    return schedule
+
+def get_params_groups(model):
+    regularized = []
+    not_regularized = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        # we do not regularize biases nor Norm parameters
+        if name.endswith(".bias") or len(param.shape) == 1:
+            not_regularized.append(param)
+        else:
+            regularized.append(param)
+    return [{'params': regularized}, {'params': not_regularized, 'weight_decay': 0.}]
