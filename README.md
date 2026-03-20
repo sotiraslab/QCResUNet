@@ -121,12 +121,12 @@ class QCResUNet(nn.Module):
 If you use this code in your research, please cite the associated papers:
 
 ```
-@inproceedings{han2024non,
-  title={Non-adversarial learning: vector-quantized common latent space for multi-sequence MRI},
-  author={Han, Luyi and Tan, Tao and Zhang, Tianyu and Wang, Xin and Gao, Yuan and Lu, Chunyao and Liang, Xinglong and Dou, Haoran and Huang, Yunzhi and Mann, Ritse},
+@inproceedings{qiu2023qcresunet,
+  title={QCResUNet: Joint subject-level and voxel-level prediction of segmentation quality},
+  author={Qiu, Peijie and Chakrabarty, Satrajit and Nguyen, Phuc and Ghosh, Soumyendu Sekhar and Sotiras, Aristeidis},
   booktitle={International Conference on Medical Image Computing and Computer-Assisted Intervention},
-  pages={481--491},
-  year={2024},
+  pages={173--182},
+  year={2023},
   organization={Springer}
 }
 @article{qiu2025qcresunet,
